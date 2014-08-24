@@ -42,8 +42,7 @@ data Node :: * -> * -> * where
     Fmap    :: forall a b f. Functor f (->) (->) => Node a b -> Node (f a) (f b)
 
 type Input b = Node Void b
-type Output a = Node a Void
-type Shader = Node Void Void
+type SurfaceShader = Node Void (Closure Color)
 
 -- | Literals.
 data Lit :: * -> * where
@@ -58,6 +57,8 @@ data Prim :: * -> * where
     MulP :: forall a. Num a => Prim (a -> a -> a)
     NormalP :: Prim (V3 Scalar)
     DiffuseP :: Prim (V3 Scalar -> Closure Color)
+    ReflectionP :: Prim (Scalar -> V3 Scalar -> Closure Color)
+    MixP :: Prim (Scalar -> (Closure Color, Closure Color) -> Closure Color)
 
 -- | Shader closures.
 data Closure a = None
@@ -68,30 +69,32 @@ data Closure a = None
                | Reflection (V3 Scalar) Scalar (Color -> a)
 
 -- | Build a function from nodes.
-toFnPure :: Node a b -> a -> b
-toFnPure Id = id
-toFnPure (Comp bc ab) = (toFnPure bc) . (toFnPure ab)
-toFnPure Exl = fst
-toFnPure Exr = snd
-toFnPure (Fork ab ac) = (toFnPure ab) &&& (toFnPure ac)
-toFnPure Inl = Left
-toFnPure Inr = Right
-toFnPure (Join ba ca) = (toFnPure ba) ||| (toFnPure ca)
-toFnPure Apply = apply
-toFnPure (Curry node) = curry $ toFnPure node
-toFnPure (Uncurry node) = uncurry $ toFnPure node
-toFnPure (Prim prim) = primFnPure prim
-toFnPure (Const prim) = const $ primConstPure prim
-toFnPure (Fmap node) = fmap (toFnPure node)
+toFn :: Node a b -> ShaderGlobals -> a -> b
+toFn Id = const id
+toFn (Comp bc ab) = \glob -> toFn bc glob . toFn ab glob
+toFn Exl = const fst
+toFn Exr = const snd
+toFn (Fork ab ac) = \glob -> toFn ab glob &&& toFn ac glob
+toFn Inl = const Left
+toFn Inr = const Right
+toFn (Join ba ca) = \glob -> toFn ba glob ||| toFn ca glob
+toFn Apply = const $ \(f, x) -> f x
+toFn (Curry node) = \glob -> curry $ toFn node glob
+toFn (Uncurry node) = \glob -> uncurry $ toFn node glob
+toFn (Prim prim) = primFn prim
+toFn (Const prim) = \glob _ -> primConst prim glob
+toFn (Fmap node) = \glob -> fmap (toFn node glob)
 
-primFnPure :: Prim (a -> b) -> a -> b
-primFnPure AddP = (+)
-primFnPure MulP = (*)
-primFnPure DiffuseP = \norm -> Diffuse norm id
+primFn :: Prim (a -> b) -> ShaderGlobals -> a -> b
+primFn AddP = const (+)
+primFn MulP = const (*)
+primFn DiffuseP = \glob norm -> Diffuse norm id
+primFn ReflectionP = \glob eta norm -> Reflection norm eta id
+primFn MixP = \glob fac (a, b) -> Mix fac a b id
 
-primConstPure :: Prim a -> a
-primConstPure (LitP lit) = primLit lit
-primConstPure NormalP = error "NormalP used in pure mode"
+primConst :: Prim a -> ShaderGlobals -> a
+primConst (LitP lit) = const $ primLit lit
+primConst NormalP = \glob -> gNormal glob
 
 primLit :: Lit a -> a
 primLit VoidL = error "Void!"
@@ -210,6 +213,8 @@ instance Show (Prim a) where
     show MulP = "(*)"
     show NormalP = "normal"
     show DiffuseP = "diffuse"
+    show ReflectionP = "reflection"
+    show MixP = "mix"
 
 --------------------
 -- Closure instances
