@@ -41,6 +41,10 @@ data Node :: * -> * -> * where
     -- Functor
     Fmap    :: forall a b f. Functor f (->) (->) => Node a b -> Node (f a) (f b)
 
+type Input b = Node Void b
+type Output a = Node a Void
+type Shader = Node Void Void
+
 -- | Literals.
 data Lit :: * -> * where
     VoidL :: forall a. Lit a
@@ -64,30 +68,30 @@ data Closure a = None
                | Reflection (V3 Scalar) Scalar (Color -> a)
 
 -- | Build a function from nodes.
-toFn :: Node a b -> a -> b
-toFn Id = id
-toFn (Comp bc ab) = (toFn bc) . (toFn ab)
-toFn Exl = fst
-toFn Exr = snd
-toFn (Fork ab ac) = (toFn ab) &&& (toFn ac)
-toFn Inl = Left
-toFn Inr = Right
-toFn (Join ba ca) = (toFn ba) ||| (toFn ca)
-toFn Apply = apply
-toFn (Curry node) = curry $ toFn node
-toFn (Uncurry node) = uncurry $ toFn node
-toFn (Prim prim) = primFn prim
-toFn (Const prim) = const $ primConst prim
-toFn (Fmap node) = fmap (toFn node)
+toFnPure :: Node a b -> a -> b
+toFnPure Id = id
+toFnPure (Comp bc ab) = (toFnPure bc) . (toFnPure ab)
+toFnPure Exl = fst
+toFnPure Exr = snd
+toFnPure (Fork ab ac) = (toFnPure ab) &&& (toFnPure ac)
+toFnPure Inl = Left
+toFnPure Inr = Right
+toFnPure (Join ba ca) = (toFnPure ba) ||| (toFnPure ca)
+toFnPure Apply = apply
+toFnPure (Curry node) = curry $ toFnPure node
+toFnPure (Uncurry node) = uncurry $ toFnPure node
+toFnPure (Prim prim) = primFnPure prim
+toFnPure (Const prim) = const $ primConstPure prim
+toFnPure (Fmap node) = fmap (toFnPure node)
 
-primFn :: Prim (a -> b) -> a -> b
-primFn AddP = (+)
-primFn MulP = (*)
-primFn DiffuseP = \norm -> Diffuse norm id
+primFnPure :: Prim (a -> b) -> a -> b
+primFnPure AddP = (+)
+primFnPure MulP = (*)
+primFnPure DiffuseP = \norm -> Diffuse norm id
 
-primConst :: Prim a -> a
-primConst (LitP lit) = primLit lit
-primConst NormalP = V3 0 1 0
+primConstPure :: Prim a -> a
+primConstPure (LitP lit) = primLit lit
+primConstPure NormalP = error "NormalP used in pure mode"
 
 primLit :: Lit a -> a
 primLit VoidL = error "Void!"
